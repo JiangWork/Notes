@@ -69,8 +69,8 @@ automatic</td></tr>
 在Java中我们通过使用`java.util.ServiceLoader`来动态加载不同服务的提供方，也就是通常说的SPI机制，通过运行时扫描`-classpath`中的`META-INFO/services`配置文件来动态加载服务。在模块化系统中，我们使用了新的方式来显式地声明服务和服务提供方。 比如：
 ```java
 module java.sql {
-    requires public java.logging;
-    requires public java.xml;
+    requires transitive java.logging;
+    requires transitive java.xml;
     exports java.sql;
     exports javax.sql;
     exports javax.transaction.xa;
@@ -135,34 +135,33 @@ JDK9仍然保留了三层类加载机制，但做了以下修改:
 3. bootstrap class loader： 用来加载核心JavaSE和JDK的模块。
 
 ## 模块依赖图及层 (Module Graph和Layer)
-通过解析模块的依赖关系(`requires`指令)，我们很容易获得模块的依赖关系图，比如：
+通过解析模块的依赖关系(`requires`指令)，我们很容易获得模块的依赖关系图，如模块`com.foo.app`的依赖图如下：
 ![alt moduleGraph](./pics/module-system/modulegraph.png "module graph")
 
 一个有效的模块图是一个单向无环图，图中的深蓝色箭头表示模块A显式声明读取模块B，浅蓝色箭头是隐式声明的依赖，即所有模块都默认读取`java.base`模块。Java编译器或者JVM确保模块图中的各个模块定义的包名不重复，即一个包不可能同时定义在模块A和模块B，这样的话带来了读取的歧义。但是可以通过部署在不同的模块图中，来加载相同包名的模块。
 
 既然是一个单向图，那么就需要有根节点，根节点的模块被称为根模块(*root modules*)，模块系统通过解析根模块的依赖关系来构建模块图，可以通过命令`----add-modules`显式的添加根模块。
 
-在Java 9中模块是模块层(Module Layer)的形式组织起来的，解析好的模块图在Java中被称为配置，一个配置加上模块类加载器称为模块层：
+在Java 9中模块是以模块层(Module Layer)的形式组织起来的，被解析了的模块图在Java中被称为配置，一个配置加上模块类加载器称为模块层：
 - Configuration = a module graph
 - Module Layer = Configuration + (Module -> Clasloader)
 
-JVM在启动的时候会创建引导层(boot layer)，层与VM的关系如下：
+JVM在启动的时候会创建一个叫引导层(boot layer)的模块层，层与VM的关系如下：
 ![alt layerAndVM](./pics/module-system/layerandvm.jpeg "Layer And VM")
 
-最上面是引导层，每个JVM应用都有且只有一个引导层，在启动的时候JVM构建并解析，加载不用的模块， 其中包含由bootstrap， platform及application 类加载器加载的模块，在构建层的时候不同模块的访问关系通过中间的模块系统告诉VM模块`requires`，`uses`，`opens`等语义，以及记录哪些包属于哪些模块等定位信息。最底层是VM层，根据上层传递的信息来控制模块之间的访问约束。
+最上面是引导层，每个JVM应用都有且只有一个引导层，在启动的时候JVM构建，解析并加载不用的模块， 其中包含由bootstrap， platform及application 类加载器加载的模块，在构建层的时候不同模块的访问关系通过中间的模块系统告诉VM模块`requires`，`uses`，`opens`等语义，以及记录哪些包属于哪些模块等定位信息。最底层是VM层，根据上层传递的信息来控制模块之间的访问约束。
 
 模块层可以堆叠，两个模块层可以成为父子关系，引导层的父层为空层。一个多层的示例如下：
-JVM在启动的时候会创建引导层(boot layer)，层与VM的关系如下：
 ![alt mutiple layers](./pics/module-system/mutiplelayers.png "Multiple Layers")
 
 上图创建了2个自定义图层Layer1和Layer2，它们的父层都是boot layer。堆叠中给定层中的模块可以读取在其下方的层中的模块，也就是说，Layer1和Layer2都可以读取引导层中的模块。 但是，Layer1无法读取Layer2中的模块，因为它们是兄弟层。引导层也不能读取Layer1和Layer2中的模块，因为引导层并不感知上层模块。Layer1和Layer2中的模块使用了不同的类加载器，因此不同版本的模块可以同时被加载到VM中(即图中`com.jdojo.service`模块)。Classloader1和Classloader2都把应用加载器作为了父加载器，使得Layer1和Layer2可以读取下层所有模块，建立模块之间的层次关系。
 
-允许将模块布置成层次形成很多高级特性，这些特性通常在高级Java应用程序（例如作为托管应用程序容器的Java EE应用程序/ Web服务器）中遇到: 比如在容器环境下托管应用程序可以使用模块层来做到模块资源隔离。
+允许将模块布置成层次的方式形成很多高级特性，这些特性通常在高级Java应用程序（例如作为托管应用程序容器的Java EE应用程序/ Web服务器）中遇到: 比如在容器环境下托管应用程序可以使用模块层来做到模块资源隔离。
 
 > Tips: 层是不可变的。 创建图层后，无法向其中添加模块或从中删除模块。 如果需要添加模块或替换其他版本的模块，则必须拆除图层并重新创建。
 
 ## Java API
-Java提供了一系列可以操作模块，构建模块层的API，主要集中在`java.lang`及`java.lang.module`包中。
+Java提供了一系列API来操作模块，构建模块层，这些类主要在`java.lang`及`java.lang.module`包中。
 
 <table>
 <thead>
@@ -262,7 +261,7 @@ Java提供了一系列可以操作模块，构建模块层的API，主要集中�
 static ModuleFinder of(Path... entries)
 static ModuleFinder ofSystem()
 ```
-`of(...)`用来查找`module-path`上的模块， `ofSystem()`该方法查找系统的模块，也就是Java运行镜像中的模块，始终能够查找到`java.base`。
+`of(...)`用来查找`module-path`上的模块， `ofSystem()`该方法查找系统的模块，也就是Java运行镜像中的模块，它始终能够查找到`java.base`。
 下面代码是查找路径`/jmod/ext1`和`/jmod/ext2`下面的模块并读取：
 ```java
         Path mp1 = Paths.get("/jmod/ext1");
@@ -290,7 +289,7 @@ static ModuleFinder ofSystem()
 ```
 
 ### 2. 创建图层配置
-一个图层配置对应一个已经解析好没有问题的module graph，可以简单认为输入为: 模块查找器(定位模块)，根模块(置顶向下根据模块声明构建图)以及父类配置(即上层)。
+一个图层配置对应一个已经解析好的合法module graph，可以简单认为输入为: 模块查找器(定位模块)，根模块(置顶向下根据模块声明构建图)以及父类配置(即上层)。
 ```java
     // Define the module finders
     String modulePath = "/jmod/ext1";
@@ -308,13 +307,13 @@ static ModuleFinder ofSystem()
 ```
 
 ### 3. 创建模块层
-前文提到，模块层就是配置+类加载器，`java.lang.ModuleLayer`代表一个模块层。该类包含两个方法，`empty()`和`boot()`，它们分别返回一个空配置的空层和引导层。它提供了以下方法来定义一个模块层:
+前文提到，模块层就是配置+类加载器，`java.lang.ModuleLayer`代表一个模块层。方法`empty()`和`boot()`分别返回一个空配置的空层和引导层。它提供了以下方法来定义一个模块层:
 ```java
 public ModuleLayer defineModulesWithOneLoader(Configuration cf，ClassLoader parentLoader)
 public ModuleLayer defineModulesWithManyLoaders(Configuration cf，ClassLoader parentLoader)
 public ModuleLayer defineModules(Configuration cf，Function<String，ClassLoader> clf)
 ```
-`defineModulesWithOneLoader`方法使用指定的配置创建层，该方法会创建一个默认类加载器来加载配置中的所有模块，该加载器的父加载器为`parentLoader`，而`defineModulesWithManyLoaders`会为每一个模块创建一个默认类加载器加载模块，`defineModules`自定义类加载器。
+`defineModulesWithOneLoader`方法使用指定的配置创建层，该方法会创建一个默认类加载器来加载配置中的所有模块，该加载器的父加载器为`parentLoader`，而`defineModulesWithManyLoaders`会为每一个模块创建一个默认类加载器加载模块，`defineModules`自定义了类加载器。
 下面代码创建了一个模块层并加载其中的类：
 ```java
     // get systemClassLoader as parant class loader
